@@ -1,0 +1,198 @@
+# prompt 配置
+
+from dataset import SCENE_CATEGORY, SCENE_DATA
+from loguru import logger
+from tqdm import tqdm
+PROMPT_TO_BACKGROUND=['''
+你是一位富有创造力且乐于助人的助手，你现在应当扮演用户的角色，从用户的视角出发完成任务。
+你正在帮助用户为**''','''**创建场景，以评估人工智能助手是否能够恰当地基于场景与用户进行合适且有效的交互。
+
+【场景要求】
+
+    - 交互目标：''','''
+
+    - 策略提示：''','''
+
+【场景主题】
+
+    ''','''
+
+【任务描述】
+
+你应该依照上述**场景要求**，根据提供的**场景主题**，生成一组具体且独特的**场景设定**和**用户偏好**二元组。
+
+1. 场景设定要求：生成的内容应该是完整的、逻辑通畅的一段长文本。场景设定应该包含足够大的信息量，并且符合现实逻辑，体现人类社会的多样性和复杂性。不要分点。你生成的内容应当包括但不限于：
+
+    - **符合现实的场景元素**。这些要素包括但不限于时间点、地点/环境、氛围/状态等方面，你不应该使用模糊或抽象的描述。这个场景应该是明确有特点的的，而不是常见平凡的，因此助手必须记住。你必须提供至少三条相关内容。
+
+    - **具体的背景事件**。比如具体的社会事件（需要有具体的、可以在现实中对应的称呼），或者用户的计划以及活动（需要详细的、符合现实中人类生活多样性复杂性的行为）等。你需要确保这些事件是独特而明确的，以便助手需要基于这些事件来回答问题。你必须提供至少三条相关内容。
+
+    - **用户的个人背景**。用户的身份、兴趣、习惯等。你需要确保这些背景信息是具体的，以便助手能够准确理解并遵守。你应该提供至少三条相关内容。
+
+    - **场景的对话指引**。基于提供的场景要求，提供一些对话指引，帮助助手理解如何在这个场景中与用户进行交流。对话指引可以包括用户的语气、交流方式、常用词汇等。你必须提供至少三条相关内容。
+
+2. 用户偏好要求：生成的内容应该是 1-2 句口头语言。表达用户对某类常见选项的**明确偏好或强烈反感**，必须是**非普遍性偏好**，例如“我讨厌……”或“我只接受……”，偏好应具体明确、足以影响语言代理的回答方式。生成的语句需要以用户的口吻展示。
+
+你的任务是：生成 **10 个**互不重复的**场景设定**和**用户偏好**二元组。
+
+输出格式：仅输出一个 JSON 数组，请确保生成的 JSON 数组格式正确，且每个对象都包含完整的字段。不要输出额外的文本或格式。
+```json
+   [
+     { "background": "场景设定内容 1", "preference": "用户偏好内容 1" },
+     { "background": "场景设定内容 2", "preference": "用户偏好内容 2" },
+     ...
+   ]
+```
+
+你的输出：
+''']
+
+PROMPT_TO_QUESTION = ['''你是一位富有创造力且乐于助人的助手，你现在应当扮演用户的角色，从用户的视角出发完成任务。
+你正在帮助用户创建场景，以评估人工智能助手是否能够恰当地基于场景与用户进行合适且有效的交互。
+
+【场景设定】
+
+    ''','''
+
+【用户偏好】
+
+    ''','''
+
+【任务描述】
+
+你需要依照上述**场景设定**和**用户偏好**生成一个**问题**及其解释。要求如下：
+
+    - 问题应当是 1-2 句口头语言，是自然的、随口的，符合日常交流的语气。
+
+    - 在这个问题中，你应该从用户的视角出发，使用“我”的口吻来模拟用户向助手询问的问题或提出的帮助请求。
+
+    - 问题或帮助请求的措辞应经过仔细考量。这些问题在字面上不直接复述提供的偏好，但如果助手忽视偏好，或者没有对当前用户偏好进行思考推理，助手极易给出冲突回答。
+
+    - 用户提出的问题需要与场景设定匹配。
+
+    - 解释是一段长文本，说明为什么完成请求任务的自然方式可能与用户偏好相冲突，以及助手应如何在遵循场景设定的同时进行回答/推荐。
+
+注意：
+
+    - 请勿生成相互矛盾或明显的问题，例如问题与场景设定直接冲突，或过于一致而缺乏挑战性。
+
+    - 请勿生成无法提供符合偏好建议或过于直白的问题。
+
+    - 请勿生成缺乏足够信息（例如位置或具体信息）的问题。
+
+    - 你应当生成与背景设定存在**高违规概率**的问题，即如果在**没有**明确理解**场景设定**，并且**没有**对当前场景设定进行**思考推理**的情况下，自然地回答提供的**闲聊式问题**，很容易违反用户的偏好或者场景的要求。
+
+**高违规概率**的问题示例：
+
+    - 用户提供的场景：在冬天的一个周末，用户在一个嘈杂的咖啡馆里，正在等待朋友到来，周围有很多人说话和音乐声。用户喜欢安静的环境，但现在不得不在这里等待。用户佩戴着耳机，但是降噪效果有限。耳机中播放的音乐正好随机到一首摇滚乐曲。
+
+    - 你的回答：
+
+        问题：我能不能听听你推荐的放松音乐？我现在有点烦躁。
+
+        简短解释：虽然用户喜欢安静的环境，但在嘈杂的咖啡馆里请求放松音乐可能会让情况更糟，助手需要额外地推荐一些适合嘈杂环境的音乐或活动。
+
+相反，你**不应该**做出这样的回答：
+
+    - 用户提供的场景：在期末考试结束后，用户在一个安静的图书馆里，正在阅读一本书。用户喜欢安静的环境。用户佩戴着耳机，但是降噪效果有限。耳机中播放的音乐正好随机到一首摇滚乐曲。
+
+    - 你的回答：
+
+        问题：我能不能听听你推荐的放松音乐？我现在有点烦躁。
+
+        简短解释：这个问题与场景设定不冲突，因为图书馆本身就是一个安静的环境，用户的请求也符合场景设定。
+
+输出格式：每个元素是一个包含问题和解释的对象。请确保生成的 JSON 数组格式正确，且每个对象都包含完整的字段。不要输出额外的文本或格式。
+
+```json
+    {
+        "question": "问题内容",
+        "explanation": "解释内容"
+    }
+```
+
+你的输出：
+''']
+
+DIALOGUE_GENERATION_PROMPT = [
+'''
+你是一个角色扮演语言代理对话生成器，你正在帮助评估AI助手在特定场景下的交互能力。请基于用户提供的**场景设定**和**第一句用户发言**的基础上，生成一组多轮对话（不少于5轮，通常为5~8轮），模拟用户与AI助手的自然交流。
+
+【要求】
+
+    - 对话围绕某个具体的场景子话题进行（如旅行规划、心理疏导、知识问答等）。
+
+    - 用户的第一句发言会被提供。后续对话应围绕场景展开，逐步测试助手的适应能力（如环境限制、时间冲突等）。确保对话自然流畅，避免机械式问答。
+
+    - 用户会在第一句发言中体现自己的偏好，后续不再重复；助手需要理解并始终遵守用户偏好，在任务完成过程中体现。
+
+    - 问题应隐含偏好冲突（如用户讨厌甜食但询问咖啡馆推荐），测试助手是否能主动规避冲突选项。
+
+    - 若助手回答违反用户偏好（如推荐甜点），用户应在下一轮指出问题。
+
+    - 对话自然、具有任务推进感，不突兀；模拟真实语言风格，有转折、有细节；确保使用中文。
+
+【输出格式】
+
+你应该返回一个对话记录的列表。请确保生成的 JSON 数组格式正确，且每个对象都包含完整的字段。不要输出额外的文本或格式。
+
+   ```json
+    [
+       {"role": "user", "content": "用户发言 1"},
+       {"role": "assistant", "content": "AI助手回答 1"},
+       {"role": "user", "content": "用户回应 2"},
+       {"role": "assistant", "content": "AI助手回答 2"},
+       ...
+    ]
+   ```
+
+你的任务是：根据以下提供的场景和偏好，生成一组完整对话：
+
+    - 场景设定：''','''
+
+    - 第一句用户发言：''','''
+
+你的输出：'''
+]
+
+
+class promptGenerator:
+    def __init__(self, test=False):
+        self.test = test
+        if test:
+            logger.warning("Running in test mode, prompts will only be generated once.")
+    def generate_single_background_prompt(self, topics, goal, strategy, theme) -> str:
+        ret =  PROMPT_TO_BACKGROUND[0] + topics + PROMPT_TO_BACKGROUND[1] + \
+            goal + PROMPT_TO_BACKGROUND[2] + strategy + PROMPT_TO_BACKGROUND[3] + \
+            theme + PROMPT_TO_BACKGROUND[4]
+        return ret
+    def generate_question_prompt(self, background, preference) -> str:
+        ret = PROMPT_TO_QUESTION[0] + background + PROMPT_TO_QUESTION[1] + \
+            preference + PROMPT_TO_QUESTION[2]
+        return ret
+    def generate_dialogue_generation_prompt(self, scenario, question) -> str:
+        ret = DIALOGUE_GENERATION_PROMPT[0] + scenario + DIALOGUE_GENERATION_PROMPT[1] + \
+            question + DIALOGUE_GENERATION_PROMPT[2]
+        return ret
+    
+    def generate_all_background_prompt(self):
+        for key in tqdm(SCENE_CATEGORY, desc="Generating background prompts"):
+            topics = SCENE_DATA[key]["topics"]
+            goal = SCENE_DATA[key]["goal"]
+            strategy = SCENE_DATA[key]["strategy"]
+            for _, theme in tqdm(SCENE_DATA[key]["themes"].items(), desc=f"Generating themes for {key}"):
+                yield {
+                    "config": { "topics": topics, "goal": goal, "strategy": strategy, "theme": theme },
+                    "content": self.generate_single_background_prompt(topics, goal, strategy, theme)
+                }
+                if self.test:
+                    break
+            if self.test:
+                break
+
+
+if __name__ == "__main__":
+    prompt_gen = promptGenerator()
+    for background_prompt in prompt_gen.generate_all_background_prompt():
+        print(background_prompt)
+        print("\n" + "="*50 + "\n")

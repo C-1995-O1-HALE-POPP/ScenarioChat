@@ -1,17 +1,5 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
-"""
-Multi-Agent Chat Framework (DashScope + Qwen)
---------------------------------------------
-让 Qwen-Turbo 扮演“学生 / 模拟用户”，Qwen-Plus (或其它型号) 扮演助理，
-根据背景设定和轮数自动对话。
-
-❶ 安装依赖：   pip install dashscope>=1.23.0
-❷ 配置密钥：   export DASHSCOPE_API_KEY="YOUR-DASHSCOPE-KEY"
-❸ 运行示例：   python multi_agent_qwen_dashscope.py
-   （可通过 --turns、--background 等 CLI 选项自定义）
-"""
+# 一个额外的多轮对话实现，字面意义的使用两个llm互相询问。
+# 按照官网api教程使用assistant携带上下文实现记忆力机制。
 
 import os
 import sys

@@ -249,9 +249,7 @@ CONTINUIITY_JUDGER_PROMPT = '''
 
 如果存在以下情况，结束对话：
 
-    - 用户或者助手任何一方，出现重复或者意义几乎一致的回应内容；
-
-    - 用户初始提出的问题或者请求，以及在对话中提出的后续问题，所有的问题请求均已经得到充分解答；
+    - 用户初始提出的问题或者请求，以及在对话中提出的后续问题， **所有** 的问题请求均已经得到助手的 **充分解答** ；
 
     - 用户或者助手的回答内容，无法进一步推进对话；
 
@@ -260,18 +258,56 @@ CONTINUIITY_JUDGER_PROMPT = '''
 注意：
     - 不要结束过短的对话。助手应该至少做出5句以上的回答。
 
+    - 如果 **对话可以继续**：回答 "true"
 
-对话历史如下：
+    - 如果 **对话应该结束**：回答 "false"
+
+同时，你需要判断对话历史中内容是否重复，即判断 **用户** 是否做出了 **重复** 或者 **意思基本一致** 的提问的回应和提问：
+
+    - 如果 **内容无重复且无含义一致**：回答 "true"
+
+    - 如果 **内容重复或出现含义一致**：回答 "false"
+
+输出格式：
+
+你应该返回一个 JSON 格式的字典，包含两个布尔值字段：`should_continue` 和 `no_repetition`。格式如下：
+
+   ```json
+       {"should_continue": 对话能否继续, "no_repetition": 内容是否重复 }
+   ```
+
+请确保生成的 JSON 数组格式正确，且每个对象都包含完整的字段。不要输出额外的文本或格式。
+
+分析举例：
+
+    - 提供的对话历史：
+
+    ```
+        {
+        "role": "user",
+        "content": "我就是觉得脑子里乱糟糟的......我是不是太难搞了？"
+        },
+        {
+        "role": "assistant",
+        "content": "其实这种状态很正常，特别是当你已经努力了很久的时候。"
+        },
+        {
+        "role": "user",
+        "content": "我就是觉得脑子里乱糟糟的......我是不是太难搞了？"
+        }
+    ```
+
+    - 你应该回答：
+
+   ```json
+       {"should_continue": true, "no_repetition": false}
+   ```
+
+   - 原因：对话可以继续，因为用户对自己的心理健康还有疑问；但用户的提问内容与之前的提问完全重复。
+
+现在，你需要分析的对话历史如下：
 
 ''', '''
-
-你的输出格式如下：
-
-    - 如果 **对话可以继续**：输出 "True"
-
-    - 如果 **对话应该结束**：输出 "False"
-
-你应该仅输出 "True" 或 "False"，不要输出其他任何内容。
 
 你的输出：
 '''
@@ -328,6 +364,5 @@ class promptChat:
 
 if __name__ == "__main__":
     prompt_gen = promptGenerator()
-    for background_prompt in prompt_gen.generate_all_background_prompt():
-        print(background_prompt)
-        print("\n" + "="*50 + "\n")
+    it = (prompt_gen.generate_all_background_prompt())
+    logger.success(f"Generated {len(list(it))} prompts")

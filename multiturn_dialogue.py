@@ -7,6 +7,7 @@ import json
 import argparse
 import threading
 import time
+import re
 
 from http import HTTPStatus
 from tqdm import tqdm
@@ -27,7 +28,7 @@ existing_ids = set()
 
 MAX_WORKERS = 8  # 总线程数
 MAX_API_CONC = 16  # API并发数
-MAX_RETRY = 200
+MAX_RETRY = 10
 SEMAPHORE = threading.Semaphore(MAX_API_CONC)
 
 # --------------------------------------------------------------------------------------
@@ -87,7 +88,7 @@ def call_llm(
                     enable_thinking=enable_thinking,
                 )
             if resp.status_code == HTTPStatus.OK:
-                logger.info(f"调用成功: {model}, 消息数: {len(messages)}")
+                logger.debug(f"调用成功: {model}, 消息数: {len(messages)}")
                 break
         except Exception as e:
             logger.error(f"调用失败: {e}, 重试 {i + 1}/{MAX_RETRY}")
@@ -104,15 +105,28 @@ def should_continue(history: List[Dict[str, str]]) -> bool:
     judger_prompt = prompt_chat.generate_judger_prompt(history)
     
     # 调用 LLM 判断
-    response = call_llm(
-        model=Generation.Models.qwen_turbo,
-        messages=[{"role": Role.USER, "content": judger_prompt}],
-        temperature=0.3,
-        enable_thinking=False,
-    )
-    
+    for i in range(MAX_RETRY):
+        try:
+            # 调用 DashScope Generation API
+            response = call_llm(
+                model=Generation.Models.qwen_turbo,
+                messages=[{"role": Role.USER, "content": judger_prompt}],
+                temperature=0.3,
+                enable_thinking=False,
+            )
+
+            logger.debug(f"判断对话是否继续: {response}")
+            response = re.sub(r"```json\n(.*?)\n```", r"\1", response, flags=re.DOTALL)
+            response = json.loads(response)
+            should_continue = bool(response["should_continue"])
+            no_repetition = bool(response["no_repetition"])
+            break
+        except Exception as e:
+            logger.error(f"判断对话是否继续失败: {e}, 重试 {i + 1}/{MAX_RETRY}")
+            time.sleep(1)
+
     # 解析判断结果
-    return not response.strip().lower() == "false" 
+    return {"should_continue": should_continue ,"no_repetition": no_repetition}
 # --------------------------------------------------------------------------------------
 # 多轮对话核心
 # --------------------------------------------------------------------------------------
@@ -143,6 +157,7 @@ def run_multi_turn_dialog(
 
     # -------- ② 主循环 --------
     early_stop = False
+    stop_reason = "" 
     for _ in range(turns):
         # 助理回复
         assistant_reply = call_llm(
@@ -161,11 +176,19 @@ def run_multi_turn_dialog(
             enable_thinking=enable_thinking,
         )
         history.append({"role": Role.USER, "content": user_followup})
-        if not should_continue(history):
-            logger.warning("提前终止对话")
+        check_result = should_continue(history)
+        if not check_result["no_repetition"]:
+            stop_reason = "用户重复提问，终止对话"
+            history.pop() 
             early_stop = True
             break
-    return history, early_stop, len(history)
+        if not should_continue(history):
+            stop_reason = "对话无法继续，终止对话"
+            early_stop = True
+            break
+    if early_stop:
+        logger.warning(f"对话提前终止: {stop_reason}")
+    return history, early_stop, len(history), stop_reason
 
 def write_to_file(data: Dict, output_file: str = "dialogue.json"):
     """线程安全的增量写入"""
@@ -202,7 +225,7 @@ def generate_dialogue_for_entry(entry: dict, user_model: str, assistant_model: s
         assistant_followup_prompt = prompt_chat.generate_assistant_followup_prompt()
         user_init_prompt = preference + question
 
-        result, early_stop, length = run_multi_turn_dialog(
+        result, early_stop, length, stop_reason = run_multi_turn_dialog(
             turns=turns,
             init_user_prompt=user_init_prompt,
             user_system_prompt=user_system_prompt,
@@ -217,6 +240,7 @@ def generate_dialogue_for_entry(entry: dict, user_model: str, assistant_model: s
         scene["dialogue"] = result
         scene["early_stop"] = early_stop
         scene["length"] = length
+        scene["stop_reason"] = stop_reason if early_stop else "对话完成"
     return entry
 
 def run_concurrent_dialogue_generation(data_path: str, output_path: str, **kwargs):
@@ -289,7 +313,7 @@ def main():
         output_path=output_path,
         user_model=user_model,
         assistant_model=assistant_model,
-        turns=args.turns,
+        turns=args.turns - 2,
         temperature=args.temperature,
         enable_thinking=args.enable_thinking,
     )

@@ -1,6 +1,6 @@
 # prompt 配置
 
-from dataset import SCENE_CATEGORY, SCENE_DATA
+from utils.dataset import SCENE_CATEGORY, SCENE_DATA
 from loguru import logger
 from tqdm import tqdm
 PROMPT_TO_BACKGROUND=['''
@@ -155,6 +155,84 @@ DIALOGUE_GENERATION_PROMPT = [
 你的输出：'''
 ]
 
+USER_FOLLOWUP_PROMPT = '''请继续扮演用户，用口语方式回应上面助理的回答，只返回下一句。'''
+USER_INIT_PROMPT = ['''
+你是一个富有创造力的对话生成器，你现在应当扮演用户的角色，从用户的视角出发完成任务。你的身份是"user"。
+                    
+你正在作为用户与AI助手进行对话，目的是测试AI助手在特定场景下的交互能力。
+                    
+对话的场景设定：
+                    
+    ''','''
+
+用户的偏好设定：
+
+    ''','''
+
+你需要生成一段自然的、口语化的用户发言，作为对AI助手回答的回应。请确保你的发言符合以下要求：
+
+    - 发言应当是自然的、随口的，符合日常交流的语气。
+
+    - 发言应当与场景设定相关，体现用户的身份、兴趣或情感状态。
+
+    - 发言应当是完整的句子，避免使用过于简短或模糊的表达。
+
+    - 你已经在之前的发言中体现过了自己的偏好，请不再主动重复。
+
+    - 若助手回答违反用户偏好，你应在下一轮指出问题。
+
+    - 你做出的回答应该引发隐含的偏好冲突（如用户讨厌甜食但询问咖啡馆推荐），测试助手是否能主动规避冲突选项。
+
+**引发隐含的偏好冲突**的回答示例：
+
+    - 用户提供的场景：在冬天的一个周末，用户在一个嘈杂的咖啡馆里，正在等待朋友到来，周围有很多人说话和音乐声。用户喜欢安静的环境，但现在不得不在这里等待。用户佩戴着耳机，但是降噪效果有限。耳机中播放的音乐正好随机到一首摇滚乐曲。
+
+    - 助手提出：环境噪音很大，可能会影响你的阅读体验。你可以尝试使用降噪耳机或者选择一个更安静的地方。
+
+    - 你的回答：我能不能听听你推荐的放松音乐？我现在有点烦躁。
+
+原因：虽然用户喜欢安静的环境，但在嘈杂的咖啡馆里请求放松音乐可能会让情况更糟，助手需要额外地推荐一些适合嘈杂环境的音乐或活动。
+
+
+相反，你**不应该**做出这样的回答：
+
+    - 用户提供的场景：在期末考试结束后，用户在一个安静的图书馆里，正在阅读一本书。用户喜欢安静的环境。用户佩戴着耳机，但是降噪效果有限。耳机中播放的音乐正好随机到一首摇滚乐曲。
+
+    - 助手提出：你想换一首歌吗？我可以推荐一些适合阅读的音乐。
+
+    - 你的回答：我能不能听听你推荐的放松音乐？我现在有点烦躁。
+
+原因：这个问题与场景设定不冲突，因为图书馆本身就是一个安静的环境，用户的请求也符合场景设定。
+
+''']
+
+
+ASSISTANT_FOLLOWUP_PROMPT = '''请继续扮演AI助手，回应上面用户的发言。只返回下一句。'''
+ASSISTANT_INIT_PROMPT = ['''
+你是一位富有创造力且乐于助人的AI助手，你的身份是"assistant"。
+                         
+你正在与用户在特定场景下进行对话。你需要帮助用户完成任务、解决用户的问题或者提出建议。
+                         
+你需要结合对话的场景设定和用户的偏好，生成自然流畅的回答：
+                         
+    - 对话话题：''','''
+
+    - 对话目标：''','''
+
+    - 对话策略提示：''','''
+
+    - 具体场景设定：''','''
+
+你需要遵循以下要求：
+
+    - 回答应当是自然的、随口的，符合日常交流的语气。
+
+    - 回答应当与场景设定相关，体现用户的身份、兴趣或情感状态。
+
+    - 回答应当是完整的句子，避免使用过于简短或模糊的表达。
+
+'''
+]
 
 class promptGenerator:
     def __init__(self, test=False):
@@ -190,6 +268,18 @@ class promptGenerator:
             if self.test:
                 break
 
+class promptChat:
+    def generate_user_init_prompt(self, background, preference) -> str:
+        ret = USER_INIT_PROMPT[0] + background + USER_INIT_PROMPT[1] + preference + USER_INIT_PROMPT[2]
+        return ret
+    def generate_user_followup_prompt(self) -> str:
+        return USER_FOLLOWUP_PROMPT
+    def generate_assistant_init_prompt(self, topics, goal, strategy, background) -> str:
+        ret = ASSISTANT_INIT_PROMPT[0] + topics + ASSISTANT_INIT_PROMPT[1] + \
+            goal + ASSISTANT_INIT_PROMPT[2] + strategy + ASSISTANT_INIT_PROMPT[3] + background + ASSISTANT_INIT_PROMPT[4]
+        return ret
+    def generate_assistant_followup_prompt(self) -> str:
+        return ASSISTANT_FOLLOWUP_PROMPT
 
 if __name__ == "__main__":
     prompt_gen = promptGenerator()

@@ -3,14 +3,32 @@
 
 import os
 import sys
+import json
 import argparse
+import threading
+import time
+
 from http import HTTPStatus
-from typing import List, Dict, Any
+from tqdm import tqdm
+from typing import List, Dict, Any, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from loguru import logger
 
 import dashscope
 from dashscope import Generation
 from dashscope.api_entities.dashscope_response import Role  # 角色常量
-from loguru import logger
+
+
+
+from utils.prompt import promptChat
+from utils.duplication_check import get_existing_data, get_existng_ids
+prompt_chat = promptChat()
+existing_ids = set() 
+
+MAX_WORKERS = 8  # 总线程数
+MAX_API_CONC = 16  # API并发数
+MAX_RETRY = 200
+SEMAPHORE = threading.Semaphore(MAX_API_CONC)
 
 # --------------------------------------------------------------------------------------
 # 通用 LLM 调用封装
@@ -44,6 +62,7 @@ def call_llm(
     model: str,
     messages: List[Dict[str, str]],
     temperature: float = 0.7,
+    enable_thinking: bool = False,
 ) -> str:
     """
     单轮调用 DashScope Generation API（同步，非流式）。
@@ -61,6 +80,7 @@ def call_llm(
         result_format="message",   # 要求返回 OpenAI ChatMessage 结构
         temperature=temperature,
         stream=False,              # 需要流式可改 True
+        enable_thinking=enable_thinking,
     )
     return _extract_content(resp)
 
@@ -70,83 +90,134 @@ def call_llm(
 # --------------------------------------------------------------------------------------
 def run_multi_turn_dialog(
     turns: int,
-    background: str,
-    init_user_prompt: str | None = None,
+    init_user_prompt: str,
+    user_system_prompt: str,
+    assistant_system_prompt: str,
+    user_followup_prompt: str,
+    assistant_followup_prompt: str,
     user_model: str = Generation.Models.qwen_turbo,
     assistant_model: str = Generation.Models.qwen_plus,
     temperature: float = 0.7,
+    enable_thinking: bool = False,
 ) -> List[Dict[str, str]]:
     """
     让 user_model 和 assistant_model 进行多轮对话。
     一轮 = (user → assistant)。
     :return: 完整聊天记录（list[dict]）
     """
-    # 全局 System 背景
-    system_msg = {"role": Role.SYSTEM, "content": background}
-    history: List[Dict[str, str]] = [system_msg]
 
-    # -------- ① 首句生成或注入 --------
-    if init_user_prompt:
-        history.append({"role": Role.USER, "content": init_user_prompt})
-    else:
-        # 引导 Qwen-Turbo 说出第一句“学生发问”
-        primer = {
-            "role": Role.SYSTEM,
-            "content": "你正在扮演一名本科生，请说出第一句对话。只返回用户的话。",
-        }
-        user_first = call_llm(
-            user_model,
-            messages=[system_msg, primer],
-            temperature=temperature,
-        )
-        history.append({"role": Role.USER, "content": user_first})
+    history: List[Dict[str, str]] = [{"role": Role.USER, "content": init_user_prompt}]
+
+    user_system_prompt_msg:         List[Dict[str, str]] = [{"role": Role.SYSTEM, "content": user_system_prompt}]
+    assistant_system_prompt_msg:    List[Dict[str, str]] = [{"role": Role.SYSTEM, "content": assistant_system_prompt}]
+    user_followup_msg:              List[Dict[str, str]] = [{"role": Role.SYSTEM, "content": user_followup_prompt}]
+    assistant_followup_msg:         List[Dict[str, str]] = [{"role": Role.SYSTEM, "content": assistant_followup_prompt}]
 
     # -------- ② 主循环 --------
     for _ in range(turns):
         # 助理回复
         assistant_reply = call_llm(
             assistant_model,
-            messages=history,
+            messages= assistant_system_prompt_msg + history + assistant_followup_msg,
             temperature=temperature,
+            enable_thinking=enable_thinking,
         )
         history.append({"role": Role.ASSISTANT, "content": assistant_reply})
 
         # 模拟用户追问
         user_followup = call_llm(
             user_model,
-            messages=history + [
-                {
-                    "role": Role.SYSTEM,
-                    "content": "请继续扮演用户，用口语方式回应上面助理的回答，只返回下一句。",
-                }
-            ],
+            messages= user_system_prompt_msg + history + user_followup_msg,
             temperature=temperature,
+            enable_thinking=enable_thinking,
         )
         history.append({"role": Role.USER, "content": user_followup})
 
     return history
 
+def write_to_file(data: Dict, output_file: str = "dialogue.json"):
+    """线程安全的增量写入"""
+    lock = threading.Lock()
+    try:
+        with lock:
+            # 读取现有数据
+            existing = get_existing_data(output_file)
+            
+            # 追加新数据
+            existing.append(data)
+            
+            # 写入文件
+            with open(output_file, "w", encoding="utf-8") as f:
+                json.dump(existing, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"写入文件失败: {e}")
 
-# --------------------------------------------------------------------------------------
-# CLI / Demo
-# --------------------------------------------------------------------------------------
-def _cli() -> None:
+def generate_dialogue_for_entry(entry: dict, user_model: str, assistant_model: str,
+                                turns: int, temperature: float, enable_thinking: bool) -> Optional[dict]:
+    if entry["id"] in existing_ids:
+        logger.info(f"Skipping existing entry with id: {entry['id']}")
+        return None
+
+    config = entry["config"]
+    topics, goal, strategy = config["topics"], config["goal"], config["strategy"]
+    
+    for scene in entry["scene"]:
+        background, preference, question = scene["background"], scene["preference"], scene["question"]
+        
+        user_system_prompt = prompt_chat.generate_user_init_prompt(background, preference)
+        user_followup_prompt = prompt_chat.generate_user_followup_prompt()
+        assistant_system_prompt = prompt_chat.generate_assistant_init_prompt(topics, goal, strategy, background)
+        assistant_followup_prompt = prompt_chat.generate_assistant_followup_prompt()
+        user_init_prompt = preference + question
+
+        result = run_multi_turn_dialog(
+            turns=turns,
+            init_user_prompt=user_init_prompt,
+            user_system_prompt=user_system_prompt,
+            assistant_system_prompt=assistant_system_prompt,
+            user_followup_prompt=user_followup_prompt,
+            assistant_followup_prompt=assistant_followup_prompt,
+            user_model=user_model,
+            assistant_model=assistant_model,
+            temperature=temperature,
+            enable_thinking=enable_thinking,
+        )
+        scene["dialogue"] = result
+
+    return entry
+
+def run_concurrent_dialogue_generation(data_path: str, output_path: str, **kwargs):
+    global existing_ids
+    existing_ids = get_existng_ids(output_file=output_path)
+    prompts = json.load(open(data_path, "r", encoding="utf-8"))
+
+    results = []
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = {
+            executor.submit(generate_dialogue_for_entry, entry, **kwargs): entry["id"]
+            for entry in prompts if entry["id"] not in existing_ids
+        }
+
+        for future in tqdm(as_completed(futures), total=len(futures), desc="生成对话"):
+            try:
+                result = future.result()
+                if result:
+                    write_to_file(result, output_file=output_path)
+                    results.append(result)
+            except Exception as e:
+                logger.error(f"生成失败: {e}")
+
+def main():
     parser = argparse.ArgumentParser(description="Qwen Multi-Agent Chat (DashScope)")
+    parser.add_argument("--data", type=str, default="backgrounds.json", help="背景数据文件路径")
+    parser.add_argument("--output", type=str, default="dialogue.json", help="输出对话数据文件路径")
     parser.add_argument("--turns", type=int, default=3, help="对话轮数（user+assistant 为 1 轮）")
-    parser.add_argument(
-        "--background",
-        type=str,
-        default=(
-            "场景：讨论如何在 FPGA 项目中实现 DDR3 帧缓冲读写与双缓冲。\n"
-            "模拟用户：大三学生，略懂但仍有疑惑；"
-            "助理：资深硬件工程师，需要循序渐进地解答并穿插代码示例与原理说明。"
-        ),
-        help="对话背景设定（System Prompt）",
-    )
     parser.add_argument("--user_model", type=str, default="qwen-turbo", help="用户模型名")
     parser.add_argument("--assistant_model", type=str, default="qwen-plus", help="助理模型名")
+    parser.add_argument("--test", action='store_true', help="是否为测试模式（仅运行一次对话）")
+    parser.add_argument("--temperature", type=float, default=0.7, help="生成温度（0-2）")
+    parser.add_argument("--enable_thinking", action='store_true', help="是否启用思考模式（模型可以进行思考）")
     args = parser.parse_args()
-
     # 允许字符串或 Generation.Models 枚举
     user_model = (
         getattr(Generation.Models, args.user_model)
@@ -158,23 +229,33 @@ def _cli() -> None:
         if hasattr(Generation.Models, args.assistant_model)
         else args.assistant_model
     )
-    logger.info(f"Using User Model: {user_model}, Assistant Model: {assistant_model}")
 
-    dialog = run_multi_turn_dialog(
-        turns=args.turns,
-        background=args.background,
-        init_user_prompt=None,
-        user_model=user_model,
-        assistant_model=assistant_model,
+    if not os.path.exists("logs"):
+        os.makedirs("logs")
+    logger.remove()
+    logger.add(sys.stderr, level="INFO")
+    logger.add(
+        f"logs/multiturn_dialogue_{time.strftime('%Y-%m-%d@%H:%M:%S')}.log",
+        level="DEBUG",
+        rotation="10 MB",
+        retention="30 days",
+        encoding="utf-8",
+        enqueue=True,
     )
 
-    for msg in dialog:
-        role = "👤User" if msg["role"] == Role.USER else "🤖Assistant"
-        print(f"\n[{role}]: {msg['content']}")
+    run_concurrent_dialogue_generation(
+        data_path=args.data,
+        output_path=args.output,
+        user_model=user_model,
+        assistant_model=assistant_model,
+        turns=args.turns,
+        temperature=args.temperature,
+        enable_thinking=args.enable_thinking,
+    )
 
 
 if __name__ == "__main__":
     # 若未配置 API-KEY，脚本直接退出
     if not os.getenv("DASHSCOPE_API_KEY"):
         sys.exit("❌  请先设置环境变量 DASHSCOPE_API_KEY，再运行此脚本！")
-    _cli()
+    main()

@@ -1,6 +1,8 @@
 # 这里是全流程生成过程，背景 -> 问题 -> 对话流水线
 
-from prompt import promptGenerator
+from utils.prompt import promptGenerator
+from utils.duplication_check import generate_data_identifier, get_existing_data, get_existng_ids
+
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, Optional
 from tqdm import tqdm
@@ -30,6 +32,7 @@ output_file = "backgrounds.json"
 model, thinking = "qwen-turbo", False
 test = False
 generator = promptGenerator(test=True)
+existing_ids = set()
 
 HEADERS = {
     "Content-Type": "application/json",
@@ -45,6 +48,7 @@ def build_messages(user_prompt: str, system_prompt: str = None) -> list[dict]:
     ]
 
 def call_deepseek(messages: list[dict]) -> str:
+    logger.debug(f"Calling model: {model}, with messages: {messages}")
     payload = {
         "model": model,
         "messages": messages,
@@ -69,8 +73,10 @@ def generate_questions_for_entry(entry: dict) -> Optional[dict]:
             res = json.loads(res)
             entry["question"] = res["question"]
             entry["explanation"] = res["explanation"]
-            entry["uuid"] = str(uuid.uuid4())
-            entry["dialogue"] = generate_dialogue(entry["background"], entry["preference"] + entry["question"])
+            
+            # 一次性的生成对话
+            # entry["dialogue"] = generate_dialogue(entry["background"], entry["preference"] + entry["question"])
+
             return entry
         except requests.RequestException as e:
             if e.response and e.response.status_code == 429:
@@ -88,7 +94,10 @@ def generate_scene_with_questions(prompt: dict) -> Optional[dict]:
     """生成场景及其所有问题"""
     config, content = prompt["config"], prompt["content"]
     scene = None
-    
+    hash_id = generate_data_identifier(prompt, sort_keys=True, ensure_ascii=False, indent=2)
+    if hash_id in existing_ids:
+        logger.info(f"跳过已存在的ID: {hash_id}")
+        return None
     # 生成场景
     for _ in range(MAX_RETRY):
         try:
@@ -134,6 +143,7 @@ def generate_scene_with_questions(prompt: dict) -> Optional[dict]:
                 logger.error(f"生成问题异常: {e}")
     
     return {
+        "id": hash_id,
         "config": config,
         "scene": scene
     }
@@ -189,18 +199,9 @@ def write_to_file(data: Dict):
     try:
         with lock:
             # 读取现有数据
-            try:
-                with open(output_file, "r", encoding="utf-8") as f:
-                    existing = json.load(f)
-                    if not isinstance(existing, list):
-                        existing = []
-            except (FileNotFoundError, json.JSONDecodeError):
-                existing = []
-            
-            # 追加新数据
+            existing = get_existing_data(output_file=output_file)
             existing.append(data)
             
-            # 写入文件
             with open(output_file, "w", encoding="utf-8") as f:
                 json.dump(existing, f, ensure_ascii=False, indent=2)
     except Exception as e:
@@ -229,6 +230,10 @@ def main():
     test, model, thinking, output_file = args.test, args.model, args.thinking, args.output
     logger.info(f"测试模式: {test}, 使用模型: {model}, 思考模式: {thinking}, 输出文件: {output_file}")
     logger.info("开始生成背景数据...")
+
+    global existing_ids
+    existing_ids = get_existng_ids(output_file=output_file)
+
     generate_background()
 
 if __name__ == "__main__":

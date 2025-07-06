@@ -299,11 +299,14 @@ class promptGenerator:
             topics = SCENE_DATA[key]["topics"]
             goal = SCENE_DATA[key]["goal"]
             strategy = SCENE_DATA[key]["strategy"]
-            for _, theme in tqdm(SCENE_DATA[key]["themes"].items(), desc=f"Generating themes for {key}"):
-                yield {
-                    "config": { "topics": topics, "goal": goal, "strategy": strategy, "theme": theme },
-                    "content": self.generate_single_background_prompt(topics, goal, strategy, theme)
-                }
+            for entry in tqdm(SCENE_DATA[key]["themes"], desc=f"Generating themes for {key}"):
+                theme, subtopics = entry["theme"], entry["subtopics"]
+                for subtopic in subtopics:
+                    theme_with_subtopic = f"{theme} - {subtopic}"
+                    yield {
+                        "config": { "topics": topics, "goal": goal, "strategy": strategy, "theme": theme_with_subtopic },
+                        "content": self.generate_single_background_prompt(topics, goal, strategy, theme_with_subtopic)
+                    }
                 if self.test:
                     break
 class promptChat:

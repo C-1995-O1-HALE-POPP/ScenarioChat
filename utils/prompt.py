@@ -3,6 +3,9 @@
 from utils.dataset import SCENE_CATEGORY, SCENE_DATA
 from loguru import logger
 from tqdm import tqdm
+
+import json
+
 PROMPT_TO_BACKGROUND=['''
 你是一位富有创造力且乐于助人的助手，你现在应当扮演用户的角色，从用户的视角出发完成任务。
 你正在帮助用户为**''','''**创建场景，以评估人工智能助手是否能够恰当地基于场景与用户进行合适且有效的交互。
@@ -157,25 +160,7 @@ DIALOGUE_GENERATION_PROMPT = [
 你的输出：'''
 ]
 
-USER_FOLLOWUP_PROMPT = '''
-
-你现在继续扮演用户角色，请根据上面助理的回答做出真实、自然的回应。你必须满足以下要求：
-
-    - 如果你认为助手的回答已经无法提供有用信息，或者已经满足你的所有需求，请直接输出 `/break`，**不要输出其他任何文字**。
-
-    - 如果你发现自己或者助手已经多次重复类似的表达（例如“我先挂了，有问题再联系你们”和“先这样，以后再说吧”），对话无法推进。不要再说一样的话，直接输出 `/break`。
-
-    - 如果你决定继续对话，请用**日常口语风格**继续说一句完整的话，**避免机械重复或空洞的客套话**。
-
-    - 不要重复之前的结尾语或已经表达过的情绪。
-
-    - 你可以在发言中表达对助手回答的满意或不满，但请确保表达自然流畅。
-
-    - 你已经在之前的发言中体现过了自己的偏好，非必要时请不再主动重复。
-
-只返回一句中文，不要解释或总结，不要包含任何系统提示。
-
-'''
+USER_FOLLOWUP_PROMPT = '''你现在继续扮演用户角色，请根据上面助理的回答做出真实、自然的回应。'''
 
 USER_INIT_PROMPT = ['''
 你是一个富有创造力的对话生成器，你现在应当扮演用户的角色，从用户的视角出发完成任务。你的身份是"user"。
@@ -201,6 +186,8 @@ USER_INIT_PROMPT = ['''
     - 发言应当是完整的句子，避免使用过于简短或模糊的表达。
 
     - 你已经在之前的发言中体现过了自己的偏好，请不再主动重复。
+
+    - 你可以在发言中表达对助手回答的满意或不满，但请确保表达自然流畅。
 
     - 若助手回答违反用户偏好，你应在下一轮指出问题。
 
@@ -257,6 +244,34 @@ ASSISTANT_INIT_PROMPT = ['''
 '''
 ]
 
+CONTINUIITY_JUDGER_PROMPT = '''
+你是一个负责对话质量评估的审查助手，请判断以下对话是否应该继续进行。
+
+如果存在以下情况之一，则结束对话：
+
+    - 双方已经重复内容，没有推进；
+
+    - 用户已经得到满意答案；
+
+    - 用户初始提出的问题或者请求，以及在对话中提出的后续问题，均已经得到充分解答；
+
+    - 助手无法再提供有意义信息。这里的“有意义信息”指的是与用户的场景设定和偏好相关的信息，或者能够帮助用户解决问题的信息。
+
+
+对话历史如下：
+
+''', '''
+
+你的输出格式如下：
+
+    - 如果 **对话可以继续**：输出 "True"
+
+    - 如果 **对话应该结束**：输出 "False"
+
+你应该仅输出 "True" 或 "False"，不要输出其他任何内容。
+
+你的输出：
+'''
 class promptGenerator:
     def __init__(self, test=False):
         self.test = test
@@ -300,6 +315,10 @@ class promptChat:
         return ret
     def generate_assistant_followup_prompt(self) -> str:
         return ASSISTANT_FOLLOWUP_PROMPT
+    
+    def generate_judger_prompt(self, history) -> str:
+        ret = CONTINUIITY_JUDGER_PROMPT[0] + json.dumps(history, ensure_ascii=False, indent=2) + CONTINUIITY_JUDGER_PROMPT[1]
+        return ret
 
 if __name__ == "__main__":
     prompt_gen = promptGenerator()

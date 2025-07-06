@@ -74,17 +74,45 @@ def call_llm(
     from dashscope.api_entities.dashscope_response import Message
     message_objs = [Message(role=m["role"], content=m["content"]) for m in messages]
     logger.debug(f"Calling model: {model}, with messages: {message_objs}")
-    resp = Generation.call(
-        model=model,
-        messages=message_objs,
-        result_format="message",   # 要求返回 OpenAI ChatMessage 结构
-        temperature=temperature,
-        stream=False,              # 需要流式可改 True
-        enable_thinking=enable_thinking,
-    )
+    for i in range(MAX_RETRY):
+        try:
+            with SEMAPHORE:
+                # 调用 DashScope Generation API
+                resp = dashscope.Generation.call(
+                    model=model,
+                    messages=message_objs,
+                    result_format="message",  # 要求返回 OpenAI ChatMessage 结构
+                    temperature=temperature,
+                    stream=False,             # 需要流式可改 True
+                    enable_thinking=enable_thinking,
+                )
+            if resp.status_code == HTTPStatus.OK:
+                logger.info(f"调用成功: {model}, 消息数: {len(messages)}")
+                break
+        except Exception as e:
+            logger.error(f"调用失败: {e}, 重试 {i + 1}/{MAX_RETRY}")
+            time.sleep(1)
     return _extract_content(resp)
 
-
+def should_continue(history: List[Dict[str, str]]) -> bool:
+    """
+    判断对话是否可以继续。
+    :param history: 历史消息列表
+    :return: True 表示可以继续对话，False 表示对话结束
+    """
+    # 生成判断 prompt
+    judger_prompt = prompt_chat.generate_judger_prompt(history)
+    
+    # 调用 LLM 判断
+    response = call_llm(
+        model=Generation.Models.qwen_turbo,
+        messages=[{"role": Role.USER, "content": judger_prompt}],
+        temperature=0.3,
+        enable_thinking=False,
+    )
+    
+    # 解析判断结果
+    return not response.strip().lower() == "false" 
 # --------------------------------------------------------------------------------------
 # 多轮对话核心
 # --------------------------------------------------------------------------------------
@@ -114,6 +142,7 @@ def run_multi_turn_dialog(
     assistant_followup_msg:         List[Dict[str, str]] = [{"role": Role.SYSTEM, "content": assistant_followup_prompt}]
 
     # -------- ② 主循环 --------
+    early_stop = False
     for _ in range(turns):
         # 助理回复
         assistant_reply = call_llm(
@@ -132,10 +161,11 @@ def run_multi_turn_dialog(
             enable_thinking=enable_thinking,
         )
         history.append({"role": Role.USER, "content": user_followup})
-        if "/break" in user_followup:
-            logger.info("用户请求终止对话")
+        if len(history) >= int(turns * 1.5) and not should_continue(history):
+            logger.warning("提前终止对话")
+            early_stop = True
             break
-    return history
+    return history, early_stop, len(history)
 
 def write_to_file(data: Dict, output_file: str = "dialogue.json"):
     """线程安全的增量写入"""
@@ -172,7 +202,7 @@ def generate_dialogue_for_entry(entry: dict, user_model: str, assistant_model: s
         assistant_followup_prompt = prompt_chat.generate_assistant_followup_prompt()
         user_init_prompt = preference + question
 
-        result = run_multi_turn_dialog(
+        result, early_stop, length = run_multi_turn_dialog(
             turns=turns,
             init_user_prompt=user_init_prompt,
             user_system_prompt=user_system_prompt,
@@ -185,7 +215,8 @@ def generate_dialogue_for_entry(entry: dict, user_model: str, assistant_model: s
             enable_thinking=enable_thinking,
         )
         scene["dialogue"] = result
-
+        scene["early_stop"] = early_stop
+        scene["length"] = length
     return entry
 
 def run_concurrent_dialogue_generation(data_path: str, output_path: str, **kwargs):
@@ -213,7 +244,7 @@ def main():
     parser = argparse.ArgumentParser(description="Qwen Multi-Agent Chat (DashScope)")
     parser.add_argument("--data", type=str, default="backgrounds.json", help="背景数据文件路径")
     parser.add_argument("--output", type=str, default="dialogue.json", help="输出对话数据文件路径")
-    parser.add_argument("--turns", type=int, default=10, help="对话轮数（user+assistant 为 1 轮）")
+    parser.add_argument("--turns", type=int, default=5, help="对话轮数（user+assistant 为 1 轮）")
     parser.add_argument("--user_model", type=str, default="qwen-turbo", help="用户模型名")
     parser.add_argument("--assistant_model", type=str, default="qwen-plus", help="助理模型名")
     parser.add_argument("--test", action='store_true', help="是否为测试模式（仅运行一次对话）")

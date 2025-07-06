@@ -132,7 +132,9 @@ def run_multi_turn_dialog(
             enable_thinking=enable_thinking,
         )
         history.append({"role": Role.USER, "content": user_followup})
-
+        if "/break" in user_followup:
+            logger.info("用户请求终止对话")
+            break
     return history
 
 def write_to_file(data: Dict, output_file: str = "dialogue.json"):

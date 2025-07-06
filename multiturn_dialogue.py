@@ -211,7 +211,7 @@ def main():
     parser = argparse.ArgumentParser(description="Qwen Multi-Agent Chat (DashScope)")
     parser.add_argument("--data", type=str, default="backgrounds.json", help="背景数据文件路径")
     parser.add_argument("--output", type=str, default="dialogue.json", help="输出对话数据文件路径")
-    parser.add_argument("--turns", type=int, default=3, help="对话轮数（user+assistant 为 1 轮）")
+    parser.add_argument("--turns", type=int, default=10, help="对话轮数（user+assistant 为 1 轮）")
     parser.add_argument("--user_model", type=str, default="qwen-turbo", help="用户模型名")
     parser.add_argument("--assistant_model", type=str, default="qwen-plus", help="助理模型名")
     parser.add_argument("--test", action='store_true', help="是否为测试模式（仅运行一次对话）")

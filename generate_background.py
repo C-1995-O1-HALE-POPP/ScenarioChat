@@ -210,6 +210,7 @@ def write_to_file(data: Dict):
 def main():
     if not os.path.exists("logs"):
         os.makedirs("logs")
+
     logger.remove()
     logger.add(sys.stderr, level="INFO")
     logger.add(
@@ -227,10 +228,17 @@ def main():
     parser.add_argument("--thinking", action="store_true", help="启用思考模式")
     args = parser.parse_args()
     global test, model, thinking, output_file
-    test, model, thinking, output_file = args.test, args.model, args.thinking, args.output
+    test, model, thinking = args.test, args.model, args.thinking
+
+    if not os.path.exists("results"):
+        os.makedirs("results")
+    os.makedirs("results/background", exist_ok=True)
+    output_file = '''results/background/background_''' + \
+        f'''{model}{"_thinking" if thinking else ""}.json'''
+    
     logger.info(f"测试模式: {test}, 使用模型: {model}, 思考模式: {thinking}, 输出文件: {output_file}")
     logger.info("开始生成背景数据...")
-
+    
     global existing_ids
     existing_ids = get_existng_ids(output_file=output_file)
 

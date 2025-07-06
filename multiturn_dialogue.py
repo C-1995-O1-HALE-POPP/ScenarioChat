@@ -243,8 +243,7 @@ def run_concurrent_dialogue_generation(data_path: str, output_path: str, **kwarg
 def main():
     parser = argparse.ArgumentParser(description="Qwen Multi-Agent Chat (DashScope)")
     parser.add_argument("--data", type=str, default="backgrounds.json", help="背景数据文件路径")
-    parser.add_argument("--output", type=str, default="dialogue.json", help="输出对话数据文件路径")
-    parser.add_argument("--turns", type=int, default=10, help="对话轮数（user+assistant 为 1 轮）")
+    parser.add_argument("--turns", type=int, default=3, help="对话轮数（user+assistant 为 1 轮）")
     parser.add_argument("--user_model", type=str, default="qwen-turbo", help="用户模型名")
     parser.add_argument("--assistant_model", type=str, default="qwen-plus", help="助理模型名")
     parser.add_argument("--test", action='store_true', help="是否为测试模式（仅运行一次对话）")
@@ -265,6 +264,12 @@ def main():
 
     if not os.path.exists("logs"):
         os.makedirs("logs")
+    if not os.path.exists("results"):
+        os.makedirs("results")
+    os.makedirs("results/multiturn_dialogue", exist_ok=True)
+    output_path = '''results/multiturn_dialogue/dialogue_''' + \
+        f'''{args.user_model}_{args.assistant_model}_{args.turns}turns''' + \
+        f'''_temperature{args.temperature}{"_thinking" if args.enable_thinking else ""}.json'''
     logger.remove()
     logger.add(sys.stderr, level="INFO")
     logger.add(
@@ -275,10 +280,13 @@ def main():
         encoding="utf-8",
         enqueue=True,
     )
+    logger.info("开始多轮对话生成")
+    logger.info(f"使用用户模型: {user_model}, 助理模型: {assistant_model}")
+    logger.info(f"对话轮数: {args.turns}, 温度: {args.temperature}, 启用思考模式: {args.enable_thinking}")
 
     run_concurrent_dialogue_generation(
         data_path=args.data,
-        output_path=args.output,
+        output_path=output_path,
         user_model=user_model,
         assistant_model=assistant_model,
         turns=args.turns,

@@ -313,7 +313,7 @@ def main():
         output_path=output_path,
         user_model=user_model,
         assistant_model=assistant_model,
-        turns=args.turns - 2,
+        turns=args.turns,
         temperature=args.temperature,
         enable_thinking=args.enable_thinking,
     )

@@ -30,8 +30,7 @@ SEMAPHORE = threading.Semaphore(MAX_API_CONC)
 output_file = "backgrounds.json"
 
 model, thinking = "qwen-turbo", False
-test = False
-generator = promptGenerator(test=True)
+generator = promptGenerator()
 existing_ids = set()
 
 HEADERS = {
@@ -39,7 +38,7 @@ HEADERS = {
     "Authorization": f"Bearer {API_KEY}",
 }
 
-def build_messages(user_prompt: str, system_prompt: str = None) -> list[dict]:
+def build_messages(user_prompt: str, system_prompt: str = "") -> list[dict]:
     return [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
@@ -222,19 +221,24 @@ def main():
         enqueue=True,
     )
     parser = argparse.ArgumentParser(description="生成背景数据")
+    parser.add_argument("--num", type=int, default=20, help="生成的背景数量")
     parser.add_argument("--test", action="store_true", help="测试模式，仅生成一次")
     parser.add_argument("--output", type=str, default="backgrounds.json", help="输出文件路径")
     parser.add_argument("--model", type=str, default="qwen-turbo", help="使用的模型名称")
     parser.add_argument("--thinking", action="store_true", help="启用思考模式")
     args = parser.parse_args()
-    global test, model, thinking, output_file
-    test, model, thinking = args.test, args.model, args.thinking
+    global model, thinking
+    test, model, thinking, num = args.test, args.model, args.thinking, args.num
 
     if not os.path.exists("results"):
         os.makedirs("results")
     os.makedirs("results/background", exist_ok=True)
+    global output_file
     output_file = '''results/background/background_''' + \
-        f'''{model}{"_thinking" if thinking else ""}.json'''
+        f'''{model}{"_thinking" if thinking else ""}{"_test" if test else ""}.json'''
+    
+    global generator
+    generator.set_test(test = test, n = num)
     
     logger.info(f"测试模式: {test}, 使用模型: {model}, 思考模式: {thinking}, 输出文件: {output_file}")
     logger.info("开始生成背景数据...")

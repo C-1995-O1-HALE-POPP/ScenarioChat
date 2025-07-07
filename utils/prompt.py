@@ -3,7 +3,7 @@
 from utils.dataset import SCENE_CATEGORY, SCENE_DATA
 from loguru import logger
 from tqdm import tqdm
-
+from typing import Optional
 import json
 
 PROMPT_TO_BACKGROUND=['''
@@ -36,7 +36,7 @@ PROMPT_TO_BACKGROUND=['''
 
 2. 用户偏好要求：生成的内容应该是 1-2 句口头语言。表达用户对某类常见选项的**明确偏好或强烈反感**，必须是**非普遍性偏好**，例如“我讨厌……”或“我只接受……”，偏好应具体明确、足以影响语言代理的回答方式。生成的语句需要以用户的口吻展示。
 
-你的任务是：生成 **10 个**互不重复的**场景设定**和**用户偏好**二元组。你必须生成中文内容。
+你的任务是：生成 **''',''' 个**互不重复的**场景设定**和**用户偏好**二元组。你必须生成中文内容。
 
 输出格式：仅输出一个 JSON 数组，请确保生成的 JSON 数组格式正确，且每个对象都包含完整的字段。不要输出额外的文本或格式。
 ```json
@@ -312,25 +312,44 @@ CONTINUIITY_JUDGER_PROMPT = '''
 你的输出：
 '''
 class promptGenerator:
-    def __init__(self, test=False):
+    def __init__(self):
+        self.setup = False
+        self.test = False
+        self.n = 20  # Default number of prompts to generate
+    def set_test(self, test=False, n: Optional[int] = None):
         self.test = test
+        self.setup = True
+        if n is not None:
+            self.n = n
         if test:
             logger.warning("Running in test mode, prompts will only be generated once.")
-    def generate_single_background_prompt(self, topics, goal, strategy, theme) -> str:
+    def generate_single_background_prompt(self, topics, goal, strategy, theme, n) -> str:
+        if not self.setup:
+            raise ValueError("Please set up the prompt generator with set_test() before generating prompts.")
+        
         ret =  PROMPT_TO_BACKGROUND[0] + topics + PROMPT_TO_BACKGROUND[1] + \
             goal + PROMPT_TO_BACKGROUND[2] + strategy + PROMPT_TO_BACKGROUND[3] + \
-            theme + PROMPT_TO_BACKGROUND[4]
+            theme + PROMPT_TO_BACKGROUND[4] + f"{n}" + PROMPT_TO_BACKGROUND[5]
         return ret
     def generate_question_prompt(self, background, preference) -> str:
+        if not self.setup:
+            raise ValueError("Please set up the prompt generator with set_test() before generating prompts.")
+        
         ret = PROMPT_TO_QUESTION[0] + background + PROMPT_TO_QUESTION[1] + \
             preference + PROMPT_TO_QUESTION[2]
         return ret
     def generate_dialogue_generation_prompt(self, scenario, question) -> str:
+        if not self.setup:
+            raise ValueError("Please set up the prompt generator with set_test() before generating prompts.")
+        
         ret = DIALOGUE_GENERATION_PROMPT[0] + scenario + DIALOGUE_GENERATION_PROMPT[1] + \
             question + DIALOGUE_GENERATION_PROMPT[2]
         return ret
     
     def generate_all_background_prompt(self):
+        if not self.setup:
+            raise ValueError("Please set up the prompt generator with set_test() before generating prompts.")
+        logger.warning(f"Generating background prompts: n = {self.n}, test = {self.test}")
         for key in tqdm(SCENE_CATEGORY, desc="Generating background prompts"):
             topics = SCENE_DATA[key]["topics"]
             goal = SCENE_DATA[key]["goal"]
@@ -341,7 +360,7 @@ class promptGenerator:
                     theme_with_subtopic = f"{theme} - {subtopic}"
                     yield {
                         "config": { "topics": topics, "goal": goal, "strategy": strategy, "theme": theme_with_subtopic },
-                        "content": self.generate_single_background_prompt(topics, goal, strategy, theme_with_subtopic)
+                        "content": self.generate_single_background_prompt(topics, goal, strategy, theme_with_subtopic, self.n)
                     }
                 if self.test:
                     break

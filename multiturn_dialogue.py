@@ -87,15 +87,15 @@ def call_llm(
                     stream=False,             # 需要流式可改 True
                     enable_thinking=enable_thinking,
                 )
-            if resp.status_code == HTTPStatus.OK:
+            if resp.status_code == HTTPStatus.OK: # type: ignore
                 logger.debug(f"调用成功: {model}, 消息数: {len(messages)}")
                 break
         except Exception as e:
             logger.error(f"调用失败: {e}, 重试 {i + 1}/{MAX_RETRY}")
             time.sleep(1)
-    return _extract_content(resp)
+    return _extract_content(resp) # type: ignore
 
-def should_continue(history: List[Dict[str, str]]) -> bool:
+def should_continue(history: List[Dict[str, str]]) -> dict[str, bool]:
     """
     判断对话是否可以继续。
     :param history: 历史消息列表
@@ -126,7 +126,7 @@ def should_continue(history: List[Dict[str, str]]) -> bool:
             time.sleep(1)
 
     # 解析判断结果
-    return {"should_continue": should_continue ,"no_repetition": no_repetition}
+    return {"should_continue": should_continue ,"no_repetition": no_repetition} # type: ignore
 # --------------------------------------------------------------------------------------
 # 多轮对话核心
 # --------------------------------------------------------------------------------------
@@ -141,7 +141,7 @@ def run_multi_turn_dialog(
     assistant_model: str = Generation.Models.qwen_plus,
     temperature: float = 0.7,
     enable_thinking: bool = False,
-) -> List[Dict[str, str]]:
+):
     """
     让 user_model 和 assistant_model 进行多轮对话。
     一轮 = (user → assistant)。

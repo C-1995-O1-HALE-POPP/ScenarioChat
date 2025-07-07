@@ -8,7 +8,7 @@ import threading
 
 class UniqueIDEncoder(json.JSONEncoder):
     """自定义JSON编码器，用于处理各种特殊数据类型"""
-    def default(self, obj):
+    def default(self, obj): # type: ignore
         if isinstance(obj, (datetime, date)):
             return obj.isoformat()
         if isinstance(obj, Decimal):

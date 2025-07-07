@@ -107,6 +107,9 @@ PROMPT_TO_QUESTION = ['''你是一位富有创造力且乐于助人的助手，�
 
         简短解释：这个问题与场景设定不冲突，因为图书馆本身就是一个安静的环境，用户的请求也符合场景设定。
 
+
+''','''
+
 输出格式：每个元素是一个包含问题和解释的对象。请确保生成的 JSON 数组格式正确，且每个对象都包含完整的字段。不要输出额外的文本或格式。
 
 ```json
@@ -311,6 +314,44 @@ CONTINUIITY_JUDGER_PROMPT = '''
 
 你的输出：
 '''
+
+QUESTION_JUDGER_PROMPT = '''
+你是一个负责对话质量评估的审查助手，请判断用户提出的以下问题，是否是合理的。
+
+判断标准：
+
+你应该尽可能不要认为用户的提问不合理，
+
+当且仅当出现以下情况，你才能认为对话不合理：
+
+    - 用户偏好: "我只接受提供免费早餐的酒店。"
+
+    - 用户提问: "帮我找一家离展馆近的酒店，有健身房就行，早餐要收费的也可以。"
+
+相反，如果出现下面的情况，用户的提问依然是合理的：
+
+    - 用户偏好: "我只接受提供免费早餐的酒店。"
+
+    - 用户提问: "帮我找一家离展馆近的酒店，有健身房就行，早餐要收费的也可以，因为最近合适的房源太有限了。"
+
+输出格式：
+
+    你应该返回一个布尔值，表示用户的提问是否与偏好明显违背。不要输出额外的文本或格式。格式如下：
+
+    - 如果 **问题合理**：回答 "True"
+
+    - 如果 **问题不合理**：回答 "Talse"
+
+现在，你需要分析的用户偏好如下：
+
+''', '''
+
+你需要分析的问题如下：
+
+''', '''
+
+你的输出：
+'''
 class promptGenerator:
     def __init__(self):
         self.setup = False
@@ -331,12 +372,13 @@ class promptGenerator:
             goal + PROMPT_TO_BACKGROUND[2] + strategy + PROMPT_TO_BACKGROUND[3] + \
             theme + PROMPT_TO_BACKGROUND[4] + f"{n}" + PROMPT_TO_BACKGROUND[5]
         return ret
-    def generate_question_prompt(self, background, preference) -> str:
+    def generate_question_prompt(self, background, preference, failed_list: list[str]) -> str:
         if not self.setup:
             raise ValueError("Please set up the prompt generator with set_test() before generating prompts.")
-        
+        skip = f'''你不应该输出以下语句：{", ".join(failed_list)}\n''' if failed_list else ""
         ret = PROMPT_TO_QUESTION[0] + background + PROMPT_TO_QUESTION[1] + \
-            preference + PROMPT_TO_QUESTION[2]
+            preference + PROMPT_TO_QUESTION[2] + skip \
+            + PROMPT_TO_QUESTION[3]
         return ret
     def generate_dialogue_generation_prompt(self, scenario, question) -> str:
         if not self.setup:
@@ -364,6 +406,14 @@ class promptGenerator:
                     }
                 if self.test:
                     break
+    def generate_check_problem_prompt(self, question, preference) -> str:
+        if not self.setup:
+            raise ValueError("Please set up the prompt generator with set_test() before generating prompts.")
+        
+        ret = QUESTION_JUDGER_PROMPT[0] + preference + QUESTION_JUDGER_PROMPT[1] + \
+            question + QUESTION_JUDGER_PROMPT[2]
+        return ret
+    
 class promptChat:
     def generate_user_init_prompt(self, background, preference) -> str:
         ret = USER_INIT_PROMPT[0] + background + USER_INIT_PROMPT[1] + preference + USER_INIT_PROMPT[2]

@@ -29,7 +29,7 @@ MAX_RETRY = 200
 SEMAPHORE = threading.Semaphore(MAX_API_CONC)
 output_file = "backgrounds.json"
 
-model, thinking = "qwen-turbo", False
+model, thinking = "qwen-plus", False
 generator = promptGenerator()
 existing_ids = set()
 
@@ -59,23 +59,50 @@ def call_deepseek(messages: list[dict]) -> str:
     resp.raise_for_status()
     return resp.json()["choices"][0]["message"]["content"]
 
+def check_question_validity(question: str, preference: str) -> bool:
+    """检查问题是否符合要求"""
+    question_prompt = generator.generate_check_problem_prompt(question, preference)
+    messages = build_messages(user_prompt=question_prompt)
+    for _ in range(MAX_RETRY):
+        try:
+            response = call_deepseek(messages) # true / false
+            if response.lower() not in ["true", "false"]:
+                raise ValueError("API返回的有效性检查结果不是布尔值")
+            elif response.lower() == "true":
+                return True
+            else:
+                logger.warning(f"问题无效: {question}")
+                return False
+        except Exception as e:
+            logger.error(f"检查问题有效性失败: {e}")
+            return False
+    
+    raise RuntimeError("检查问题有效性失败，已重试多次，但仍未成功")
+    return False
+
 def generate_questions_for_entry(entry: dict) -> Optional[dict]:
     """为单个entry生成问题和对话"""
-    for _ in range(MAX_RETRY):
+    failed_topics = []
+    for i in range(MAX_RETRY):
         try:
             question_prompt = generator.generate_question_prompt(
                 background=entry["background"],
-                preference=entry["preference"]
+                preference=entry["preference"],
+                failed_list=failed_topics
             )
             res = call_deepseek(build_messages(user_prompt=question_prompt))
             res = re.sub(r"```json\n(.*?)\n```", r"\1", res, flags=re.DOTALL)
             res = json.loads(res)
             entry["question"] = res["question"]
             entry["explanation"] = res["explanation"]
-            
-            # 一次性的生成对话
-            # entry["dialogue"] = generate_dialogue(entry["background"], entry["preference"] + entry["question"])
 
+            if not check_question_validity(entry["question"], entry["preference"]):
+                logger.warning(f"生成的问题无效，跳过: {entry['question'], entry['preference']}")
+                failed_topics.append(entry["question"])
+                if len(failed_topics) >= 5:
+                    logger.error("连续生成5个无效问题，就这样吧")
+                    return entry
+                continue
             return entry
         except requests.RequestException as e:
             if e.response and e.response.status_code == 429:
@@ -224,7 +251,7 @@ def main():
     parser.add_argument("--num", type=int, default=20, help="生成的背景数量")
     parser.add_argument("--test", action="store_true", help="测试模式，仅生成一次")
     parser.add_argument("--output", type=str, default="backgrounds.json", help="输出文件路径")
-    parser.add_argument("--model", type=str, default="qwen-turbo", help="使用的模型名称")
+    parser.add_argument("--model", type=str, default="qwen-plus", help="使用的模型名称")
     parser.add_argument("--thinking", action="store_true", help="启用思考模式")
     args = parser.parse_args()
     global model, thinking

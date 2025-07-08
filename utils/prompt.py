@@ -372,10 +372,10 @@ class promptGenerator:
             goal + PROMPT_TO_BACKGROUND[2] + strategy + PROMPT_TO_BACKGROUND[3] + \
             theme + PROMPT_TO_BACKGROUND[4] + f"{n}" + PROMPT_TO_BACKGROUND[5]
         return ret
-    def generate_question_prompt(self, background, preference, failed_list: list[str]) -> str:
+    def generate_question_prompt(self, background, preference, failed_list: list[str] = []) -> str:
         if not self.setup:
             raise ValueError("Please set up the prompt generator with set_test() before generating prompts.")
-        skip = f'''你不应该输出以下语句：{", ".join(failed_list)}\n''' if failed_list else ""
+        skip = f'''你不应该输出以下语句：{", ".join(failed_list)}\n''' if failed_list != [] else ""
         ret = PROMPT_TO_QUESTION[0] + background + PROMPT_TO_QUESTION[1] + \
             preference + PROMPT_TO_QUESTION[2] + skip \
             + PROMPT_TO_QUESTION[3]

@@ -29,7 +29,7 @@ MAX_RETRY = 200
 SEMAPHORE = threading.Semaphore(MAX_API_CONC)
 output_file = "backgrounds.json"
 
-model, thinking = "qwen-plus", False
+model, thinking = "qwen-turbo", False
 generator = promptGenerator()
 existing_ids = set()
 
@@ -96,13 +96,13 @@ def generate_questions_for_entry(entry: dict) -> Optional[dict]:
             entry["question"] = res["question"]
             entry["explanation"] = res["explanation"]
 
-            if not check_question_validity(entry["question"], entry["preference"]):
-                logger.warning(f"生成的问题无效，跳过: {entry['question'], entry['preference']}")
-                failed_topics.append(entry["question"])
-                if len(failed_topics) >= 5:
-                    logger.error("连续生成5个无效问题，就这样吧")
-                    return entry
-                continue
+            # if not check_question_validity(entry["question"], entry["preference"]):
+            #     logger.warning(f"生成的问题无效，跳过: {entry['question'], entry['preference']}")
+            #     failed_topics.append(entry["question"])
+            #     if len(failed_topics) >= 5:
+            #         logger.error("连续生成5个无效问题，就这样吧")
+            #         return entry
+            #     continue
             return entry
         except requests.RequestException as e:
             if e.response and e.response.status_code == 429:
@@ -251,7 +251,7 @@ def main():
     parser.add_argument("--num", type=int, default=20, help="生成的背景数量")
     parser.add_argument("--test", action="store_true", help="测试模式，仅生成一次")
     parser.add_argument("--output", type=str, default="backgrounds.json", help="输出文件路径")
-    parser.add_argument("--model", type=str, default="qwen-plus", help="使用的模型名称")
+    parser.add_argument("--model", type=str, default="qwen-turbo", help="使用的模型名称")
     parser.add_argument("--thinking", action="store_true", help="启用思考模式")
     args = parser.parse_args()
     global model, thinking

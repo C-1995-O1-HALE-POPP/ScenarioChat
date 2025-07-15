@@ -20,7 +20,6 @@ from dashscope import Generation
 from dashscope.api_entities.dashscope_response import Role  # 角色常量
 
 
-
 from utils.prompt import promptChat
 from utils.duplication_check import get_existing_data, get_existng_ids
 prompt_chat = promptChat()
@@ -74,7 +73,7 @@ def call_llm(
     # Convert list of dicts to list of Message objects
     from dashscope.api_entities.dashscope_response import Message
     message_objs = [Message(role=m["role"], content=m["content"]) for m in messages]
-    logger.debug(f"Calling model: {model}, with messages: {message_objs}")
+    logger.debug(f"Calling model: {model}, with messages: \n{json.dumps(message_objs, ensure_ascii=False, indent=2)}")
     for i in range(MAX_RETRY):
         try:
             with SEMAPHORE:
@@ -95,7 +94,7 @@ def call_llm(
             time.sleep(1)
     return _extract_content(resp) # type: ignore
 
-def should_continue(history: List[Dict[str, str]]) -> dict[str, bool]:
+def judge_should_continue(history: List[Dict[str, str]]) -> dict[str, bool]:
     """
     判断对话是否可以继续。
     :param history: 历史消息列表
@@ -120,13 +119,14 @@ def should_continue(history: List[Dict[str, str]]) -> dict[str, bool]:
             response = json.loads(response)
             should_continue = bool(response["should_continue"])
             no_repetition = bool(response["no_repetition"])
+            reason = response["reason"]
             break
         except Exception as e:
             logger.error(f"判断对话是否继续失败: {e}, 重试 {i + 1}/{MAX_RETRY}")
             time.sleep(1)
 
     # 解析判断结果
-    return {"should_continue": should_continue ,"no_repetition": no_repetition} # type: ignore
+    return {"should_continue": should_continue ,"no_repetition": no_repetition, "reason": reason} # type: ignore
 # --------------------------------------------------------------------------------------
 # 多轮对话核心
 # --------------------------------------------------------------------------------------
@@ -176,19 +176,18 @@ def run_multi_turn_dialog(
             enable_thinking=enable_thinking,
         )
         history.append({"role": Role.USER, "content": user_followup})
-        check_result = should_continue(history)
-        if not check_result["no_repetition"]:
-            stop_reason = "用户重复提问，终止对话"
-            history.pop() 
-            early_stop = True
-            break
-        if not should_continue(history):
-            stop_reason = "对话无法继续，终止对话"
+        check_result = judge_should_continue(history)
+        should_continue = check_result["should_continue"]
+        no_repetition = check_result["no_repetition"]
+        stop_reason = check_result["reason"]
+        if not should_continue or not no_repetition:
+            if not no_repetition:
+                history.pop()  # 移除重复的用户提问
             early_stop = True
             break
     if early_stop:
         logger.warning(f"对话提前终止: {stop_reason}")
-    return history, early_stop, len(history), stop_reason
+    return history, early_stop, len(history), stop_reason, no_repetition
 
 def write_to_file(data: Dict, output_file: str = "dialogue.json"):
     """线程安全的增量写入"""
@@ -225,7 +224,7 @@ def generate_dialogue_for_entry(entry: dict, user_model: str, assistant_model: s
         assistant_followup_prompt = prompt_chat.generate_assistant_followup_prompt()
         user_init_prompt = preference + question
 
-        result, early_stop, length, stop_reason = run_multi_turn_dialog(
+        result, early_stop, length, stop_reason, no_repetition = run_multi_turn_dialog(
             turns=turns,
             init_user_prompt=user_init_prompt,
             user_system_prompt=user_system_prompt,
@@ -241,6 +240,7 @@ def generate_dialogue_for_entry(entry: dict, user_model: str, assistant_model: s
         scene["early_stop"] = early_stop
         scene["length"] = length
         scene["stop_reason"] = stop_reason if early_stop else "对话完成"
+        scene["no_repetition"] = no_repetition
     return entry
 
 def run_concurrent_dialogue_generation(data_path: str, output_path: str, **kwargs):
@@ -293,7 +293,8 @@ def main():
     os.makedirs("results/multiturn_dialogue", exist_ok=True)
     output_path = '''results/multiturn_dialogue/dialogue_''' + \
         f'''{args.user_model}_{args.assistant_model}_{args.turns}turns''' + \
-        f'''_temperature{args.temperature}{"_thinking" if args.enable_thinking else ""}.json'''
+        f'''_temperature{args.temperature}{"_thinking" if args.enable_thinking else ""}''' + \
+        f'''_{time.strftime('%Y-%m-%d@%H:%M:%S')}.json'''
     logger.remove()
     logger.add(sys.stderr, level="INFO")
     logger.add(
@@ -307,6 +308,7 @@ def main():
     logger.info("开始多轮对话生成")
     logger.info(f"使用用户模型: {user_model}, 助理模型: {assistant_model}")
     logger.info(f"对话轮数: {args.turns}, 温度: {args.temperature}, 启用思考模式: {args.enable_thinking}")
+    logger.info(f"输出文件: {output_path}")
 
     run_concurrent_dialogue_generation(
         data_path=args.data,
